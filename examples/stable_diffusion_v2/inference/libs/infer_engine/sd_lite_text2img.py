@@ -16,7 +16,7 @@ class SDLiteText2Img(ModelBase):
         guidance_scale=7.5,
         num_inference_steps=50,
     ):
-        super(SDLiteText2Img, self).__init__(device_target, device_id)
+        super().__init__(device_target, device_id)
         self.text_encoder = self._init_model(text_encoder)
         self.unet = self._init_model(unet)
         self.scheduler = self._init_model(scheduler)

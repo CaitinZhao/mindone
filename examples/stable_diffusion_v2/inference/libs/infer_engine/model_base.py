@@ -1,10 +1,10 @@
 """Inference Model Base"""
 
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 import mindspore_lite as mslite
 
 
-class ModelBase(metaclass=ABCMeta):
+class ModelBase(metaclass=ABC):
     """
     base class for model load and infer
     """
@@ -21,3 +21,7 @@ class ModelBase(metaclass=ABCMeta):
         model = mslite.Model()
         model.build_from_file(model_path, mslite.ModelType.MINDIR, self.context)
         return model
+
+    @abstractmethod
+    def __call__(self, *args, **kwargs):
+        ...

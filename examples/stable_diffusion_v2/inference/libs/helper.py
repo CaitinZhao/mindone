@@ -100,7 +100,6 @@ class VaeImageProcessor:
                  resample="lanczos",
                  do_normalize=True,
                  do_convert_rgb=False,):
-        super(VaeImageProcessor, self).__init__()
         self.do_resize = do_resize
         self.vae_scale_factor = vae_scale_factor
         self.resample = resample
