@@ -470,6 +470,13 @@ def _init_parallel_settings(net, op_group, parallel_modules=None):
     return None
 
 
+def get_cell_params_fullname_dict(cell: nn.Cell):
+    fullname_dict = {}
+    for param_name in cell._params:
+        fullname_dict[param_name] = getattr(cell, param_name).name
+    return fullname_dict
+
+
 def _prepare_network(network: nn.Cell, op_group: str, parallel_modules=None):
     new_net = _init_parallel_settings(network, op_group, parallel_modules)
     if new_net is not None:
@@ -479,7 +486,17 @@ def _prepare_network(network: nn.Cell, op_group: str, parallel_modules=None):
             continue
         new_sub_net = _init_parallel_settings(sub_net, op_group, parallel_modules)
         if new_sub_net is not None:
-            network.__setattr__(name, new_sub_net)
+            params_fullname_dict = get_cell_params_fullname_dict(sub_net)
+            if isinstance(network, (nn.CellList, nn.SequentialCell)):
+                network._cells[name] = new_sub_net
+                if isinstance(network, nn.SequentialCell):
+                    network.cell_list = list(network._cells.values())
+            else:
+                network.__setattr__(name, new_sub_net)
+
+            # parameter name will update after __setattr__, reset to ori parameter name.
+            for param_name in new_sub_net.net._params:
+                getattr(new_sub_net.net, param_name).name = params_fullname_dict[param_name]
             continue
         if sub_net._params:
             for param_name in sub_net._params:
