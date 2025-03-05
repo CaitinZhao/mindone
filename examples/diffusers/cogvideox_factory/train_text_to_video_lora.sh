@@ -7,13 +7,10 @@ NUM_NPUS=8
 # Experiment with as many hyperparameters as you want!
 LEARNING_RATES=("1e-5")
 LR_SCHEDULES=("cosine_with_restarts")
-OPTIMIZERS=("adamw" "adam")
+OPTIMIZERS=("adamw")
 MAX_TRAIN_STEPS=("3000")
-SP=False
-SP_SIZE=$NUM_NPUS
 F=77  # Need to change to multiple of 8, when LATENTS_CACHE=0 & SP=True
 FA_RCP=False
-ENABLE_DYNAMIC_SHAPE=0
 LATENTS_CACHE=1
 EMBEDDINGS_CACHE=1
 OUTPUT_ROOT_DIR=./output_lora
@@ -22,7 +19,6 @@ OUTPUT_ROOT_DIR=./output_lora
 MINDSPORE_MODE=0
 JIT_LEVEL=O1
 AMP_LEVEL=O2
-DEEPSPEED_ZERO_STAGE=3
 
 # Prepare launch cmd according to NUM_NPUS
 if [ "$NUM_NPUS" -eq 1 ]; then
@@ -30,19 +26,10 @@ if [ "$NUM_NPUS" -eq 1 ]; then
     EXTRA_ARGS=""
     SP=False
 else
-    LAUNCHER="msrun --bind_core=True --worker_num=$NUM_NPUS --local_worker_num=$NUM_NPUS --log_dir="./log_sp_graph""
-    EXTRA_ARGS="--distributed --zero_stage $DEEPSPEED_ZERO_STAGE"
+    LAUNCHER="msrun --bind_core=True --worker_num=$NUM_NPUS --local_worker_num=$NUM_NPUS --log_dir="./log_lora""
+    EXTRA_ARGS="--distributed"
 fi
-if [ "$ENABLE_DYNAMIC_SHAPE" -eq 1 ]; then
-  # Enable kernel backoff to support the Python floor operation at line 444 in mindone/mindone/diffusers/models/embeddings.py.
-  # Otherwise, a "RuntimeError" will be raised: "The current operator needs to be supplemented with an adapter, please
-  # check in `transform` directory. node is Default/network-TrainStepForCogVideo/transformer-CogVideoTransformer3DModel_SP/patch_embed-CogVideoXPatchEmbed/ScalarFloorDiv-op1".
-  # Additionally, it is not feasible to replace the Python floor operation with `ms.mint.floor`. The reason is that
-  # `ms.mint.floor` does not accept scalar input, the scalar input must be converted to an `ms.Tensor` first. However,
-  # `ms.Tensor` does not support non-constant input in graph mode.
-  export MS_DISABLE_KERNEL_BACKOFF=0
-  EXTRA_ARGS="$EXTRA_ARGS --dynamic_shape --bucket_config=cogvideox/bucket.yaml"
-fi
+
 if [ "$LATENTS_CACHE" -eq 1 ]; then
   EXTRA_ARGS="$EXTRA_ARGS --latents_cache"
 fi
@@ -103,8 +90,6 @@ for learning_rate in "${LEARNING_RATES[@]}"; do
           --mindspore_mode $MINDSPORE_MODE \
           --jit_level $JIT_LEVEL \
           --amp_level $AMP_LEVEL \
-          --enable_sequence_parallelism $SP \
-          --sequence_parallel_shards $SP_SIZE \
           $EXTRA_ARGS"
 
         echo "Running command: $cmd"

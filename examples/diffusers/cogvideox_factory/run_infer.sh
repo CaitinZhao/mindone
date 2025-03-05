@@ -1,4 +1,5 @@
-# Num of NPUs for training
+# export MS_DEV_RUNTIME_CONF="memory_statistics:True,compile_statistics:True"
+# Num of NPUs for inference
 # export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 NUM_NPUS=8
 SP=True
