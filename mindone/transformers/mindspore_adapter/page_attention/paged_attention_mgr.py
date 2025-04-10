@@ -1,0 +1,69 @@
+"""Paged Attention Manager for inference."""
+import math
+
+import mindspore as ms
+from mindspore import nn, ops
+from mindspore.common.initializer import initializer
+
+
+class PagedAttentionMgr(nn.Cell):
+    """Paged Attention Manager."""
+
+    def __init__(
+        self,
+        n_heads,
+        head_dim,
+        n_kv_heads,
+        kv_shape,
+        seq_length=-1,
+        compute_dtype=ms.float16,
+        parallel_decoding=False,
+        chunk_prefill=False,
+    ):
+        super().__init__()
+        self.n_heads = n_heads
+        self.head_dim = head_dim
+        self.n_kv_heads = n_kv_heads
+        self.seq_length = seq_length
+        self.is_first_iteration = True
+        self.scale_value = 1 / math.sqrt(self.head_dim)
+        self.key_cache = ms.Parameter(
+            initializer("zeros", kv_shape, compute_dtype), name="key_cache", requires_grad=False
+        )
+        self.value_cache = ms.Parameter(
+            initializer("zeros", kv_shape, compute_dtype), name="value_cache", requires_grad=False
+        )
+
+        self.reshape_and_cache = ops.ReshapeAndCache()
+        self.paged_attention = ops.PagedAttention(self.n_heads, self.scale_value, self.n_kv_heads)
+        self.paged_attention_with_alibi = ops.PagedAttentionMask(self.n_heads, self.scale_value, self.n_kv_heads)
+        self.parallel_decoding = parallel_decoding
+        self.chunk_prefill = chunk_prefill
+
+    # pylint: disable=W0613
+    def construct(self, key, value, slot_mapping, batch_valid_length=None):
+        """The forward compute of KVCache for Paged Attention."""
+        return self.reshape_and_cache(key, value, self.key_cache, self.value_cache, slot_mapping)
+
+    def paged_attn(self, query, batch_valid_length, block_tables, attn_mask=None, q_seq_lens=None):
+        """The forward compute of Paged Attention."""
+        if self.parallel_decoding or self.chunk_prefill:
+            attn_mask = attn_mask.astype(ms.bool_).astype(query.dtype) * -10000
+            return self.paged_attention(
+                query,
+                self.key_cache,
+                self.value_cache,
+                block_tables,
+                batch_valid_length,
+                None,
+                None,
+                attn_mask,
+                q_seq_lens,
+            )
+        return self.paged_attention(query, self.key_cache, self.value_cache, block_tables, batch_valid_length)
+
+    def paged_attn_with_alibi(self, query, batch_valid_length, block_tables, alibi_tensor):
+        """The forward compute of KVCache for Paged Attention with alibi tensor."""
+        return self.paged_attention_with_alibi(
+            query, self.key_cache, self.value_cache, block_tables, batch_valid_length, None, None, alibi_tensor
+        )
