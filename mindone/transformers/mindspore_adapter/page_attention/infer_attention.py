@@ -36,7 +36,7 @@ class InferRotaryEmbedding(nn.Cell):
             batch_valid_length: Int32 tensor with shape [batch_size] the past calculated the index.
 
     Outputs:
-            ms.Tensor of shape :math:`(batch, seq_length, hidden_size)`.
+            Tensor of shape :math:`(batch, seq_length, hidden_size)`.
     """
 
     def __init__(self, rotary_cos_format=0):
@@ -369,13 +369,14 @@ class InferAttention(nn.Cell):
         batch_valid_length,
         block_tables,
         slot_mapping,
+        freqs_cis,
         attn_mask=None,
         alibi_mask=None,
         q_seq_lens=None,
     ):
         """Forward process of the Infer Attention Cell"""
-        # if self.use_rope_rotary_emb:
-        #     query, key = self._apply_rotary_pos_emb(query, key, freqs_cis, batch_valid_length)
+        if self.use_rope_rotary_emb:
+            query, key = self._apply_rotary_pos_emb(query, key, freqs_cis, batch_valid_length)
 
         key_out = self.paged_attention_mgr(key, value, slot_mapping, batch_valid_length)
         query = ops.depend(query, key_out)

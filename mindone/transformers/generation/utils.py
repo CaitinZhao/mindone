@@ -524,7 +524,8 @@ class GenerationMixin:
         order to save memory (because no back and forth `to_legacy_cache` and `from_legacy_cache` will be performed
         for `HybridMambaAttentionDynamicCache`).
         """
-        return self._supports_cache_class and "jamba" not in self.__class__.__name__.lower()
+        return (self._supports_cache_class and "jamba" not in self.__class__.__name__.lower() or
+                self.config._attn_implementation == "page_attention")
 
     def _prepare_special_tokens(
         self, generation_config: GenerationConfig, kwargs_has_attention_mask: Optional[bool] = None, **ignore_kwargs

@@ -1,7 +1,8 @@
 """manage simple kv cache for paged attention."""
+import logging
 from typing import List
 
-from transformers.utils import logging
+logger = logging.getLogger(__name__)
 
 
 class BlockMemPool:

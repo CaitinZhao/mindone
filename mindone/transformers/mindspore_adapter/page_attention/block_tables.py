@@ -1,10 +1,12 @@
 """manage simple block tables for paged attention."""
+import logging
 from typing import List
 
 import numpy as np
-from transformers.utils import logging
 
 from .cache_engine import BlockMemPool, CacheEngine
+
+logger = logging.getLogger(__name__)
 
 
 class BlockTables:

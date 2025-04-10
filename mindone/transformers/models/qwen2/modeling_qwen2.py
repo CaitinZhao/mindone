@@ -88,16 +88,16 @@ def _prepare_4d_causal_attention_mask_with_cache_position(
         # In this case we assume that the mask comes already in inverted form and requires no inversion or slicing.
         causal_mask = attention_mask
     else:
-        causal_mask = mint.full((sequence_length, target_length), fill_value=min_dtype, dtype=dtype)
+        causal_mask = ops.full((sequence_length, target_length), fill_value=min_dtype, dtype=dtype)
         if sequence_length != 1:
-            causal_mask = mint.triu(causal_mask, diagonal=1)
-        causal_mask *= mint.arange(target_length) > cache_position.reshape(-1, 1)
+            causal_mask = ops.triu(causal_mask, diagonal=1)
+        causal_mask *= ops.arange(target_length) > cache_position.reshape(-1, 1)
         causal_mask = causal_mask[None, None, :, :].broadcast_to((batch_size, 1, -1, -1))
         if attention_mask is not None:
             # causal_mask = causal_mask  # copy to contiguous memory for in-place edit
             mask_length = attention_mask.shape[-1]
             # padding_mask = causal_mask[:, :, :, :mask_length] + attention_mask[:, None, None, :]
-            padding_mask = mint.narrow(causal_mask, -1, 0, mask_length) + attention_mask[:, None, None, :]
+            padding_mask = ops.narrow(causal_mask, -1, 0, mask_length) + attention_mask[:, None, None, :]
             padding_mask = padding_mask == 0
             # causal_mask[:, :, :, :mask_length] = causal_mask[:, :, :, :mask_length].masked_fill(
             #     padding_mask, min_dtype
@@ -105,12 +105,12 @@ def _prepare_4d_causal_attention_mask_with_cache_position(
             if mask_length >= causal_mask.shape[-1]:
                 causal_mask = causal_mask.masked_fill(padding_mask, min_dtype)
             else:
-                causal_mask = mint.cat(
+                causal_mask = ops.cat(
                     [
-                        mint.narrow(causal_mask, -1, 0, mask_length).masked_fill(padding_mask, min_dtype),
-                        mint.narrow(causal_mask, -1, mask_length, causal_mask.shape[-1] - mask_length),
+                        ops.narrow(causal_mask, -1, 0, mask_length).masked_fill(padding_mask, min_dtype),
+                        ops.narrow(causal_mask, -1, mask_length, causal_mask.shape[-1] - mask_length),
                     ],
-                    dim=-1,
+                    axis=-1,
                 )
 
     return causal_mask
@@ -753,16 +753,14 @@ class Qwen2Model(Qwen2PreTrainedModel):
         if self.pa_atten:
             self.is_first_iteration = ms.Parameter(ms.Tensor(True))
             self.freqs_mgr = FreqsMgr(
-                head_dim=self.head_dim,
-                seq_length=config.seq_length,
-                max_position_embedding=config.max_position_embedding,
-                rotary_dtype=config.rotary_dtype,
-                theta=config.theta,
-                scaling_factor=config.scaling_factor,
-                extend_method=config.extend_method,
+                head_dim=config.hidden_size // config.num_attention_heads,
+                seq_length=config.max_position_embeddings,
+                max_position_embedding=config.max_position_embeddings,
+                rotary_dtype=ms.bfloat16,
+                theta=config.rope_theta,
             )
             self.mask_mgr = LowerTriangularMaskWithDynamic(
-                seq_length=config.seq_length,
+                seq_length=config.hidden_size // config.num_attention_heads,
                 batch_size=1,
                 compute_type=ms.bfloat16,
                 is_dynamic=True,
@@ -828,7 +826,6 @@ class Qwen2Model(Qwen2PreTrainedModel):
             )
 
         if inputs_embeds is None:
-            input_ids = input_ids[:, -1:] if self.pa_atten and self.is_first_iteration else input_ids
             inputs_embeds = self.embed_tokens(input_ids)
 
         if cache_position is None:
@@ -876,7 +873,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
                     else:
                         freqs_cis = self.freqs_mgr.increment(batch_valid_length)
                     if self.is_first_iteration:
-                        self.is_first_iteration = False
+                        ops.assign(self.is_first_iteration, ms.Tensor(False))
                 layer_outputs = decoder_layer(
                     hidden_states,
                     attention_mask=causal_mask,
@@ -1018,10 +1015,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
         self.pa_atten = config._attn_implementation == "page_attention"
+        self.batch_valid_length = None
         if self.pa_atten:
             self.max_seq_len = config.max_position_embeddings
             self.valid_length_each_example = None
-            self.batch_valid_length = None
             self.block_mgr = BlockTables(1024, 32, self.max_seq_len)
             self.block_mgr.init_cache_engine(1)
 
@@ -1055,15 +1052,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         output_attentions = False
         output_hidden_states = False
         return_dict = False
-        cache_position = ms.Tensor(
-            shape=[
-                None,
-            ],
-            dtype=ms.int32,
-        )
+        cache_position = None
         block_tables = ms.Tensor(shape=[None, None], dtype=ms.int32) if self.pa_atten else None
         slot_mapping = ms.Tensor(shape=[None], dtype=ms.int32) if self.pa_atten else None
-        batch_valid_length = ms.mutable(ms.Tensor(shape=[], dtype=ms.int32)) if self.pa_atten else None
+        batch_valid_length = ms.Tensor([1,], dtype=ms.int32) if self.pa_atten else None
         self.set_inputs(
             input_ids,
             attention_mask,
@@ -1226,13 +1218,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
 
             model_inputs = {"input_ids": input_ids}
 
+        input_ids = model_inputs["input_ids"]
         if isinstance(past_key_values, StaticCache) and attention_mask.ndim == 2:
-            if inputs_embeds is not None:
-                batch_size, sequence_length = inputs_embeds.shape
-                device = None
-            else:
-                batch_size, sequence_length = input_ids.shape
-                device = None
+            batch_size, sequence_length = input_ids.shape
+            device = None
 
             dtype = self.lm_head.weight.dtype
             min_dtype = dtype_to_min(dtype)
@@ -1248,6 +1237,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 batch_size=batch_size,
             )
         slot_mapping, block_tables = None, None
+
         if self.pa_atten:
             # get block table and slot mapping
             bs, seq_len = input_ids.shape
@@ -1262,6 +1252,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 block_tables, slot_mapping = self.block_mgr.assemble_pa_inc_inputs(
                     self.valid_length_each_example, [False]
                 )
+                input_ids = input_ids[:, -1:]
             slot_mapping = ms.tensor(slot_mapping)
             block_tables = ms.tensor(block_tables)
 
@@ -1269,20 +1260,24 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 self.batch_valid_length = ms.tensor(seq_len).to(ms.int32).reshape(bs)
             else:
                 self.batch_valid_length += 1
+            use_cache = False
+            past_key_values = None
+            cache_position = None
+            self.set_dynamic_tensers()
 
         model_inputs.update(
             {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
                 "position_ids": position_ids,
-                "cache_position": cache_position,
                 "past_key_values": past_key_values,
                 "use_cache": use_cache,
-                "attention_mask": attention_mask,
+                "cache_position": cache_position,
                 "block_tables": block_tables,
                 "slot_mapping": slot_mapping,
                 "batch_valid_length": self.batch_valid_length,
             }
         )
-        self.set_dynamic_tensers()
         return model_inputs
 
     # FIXME

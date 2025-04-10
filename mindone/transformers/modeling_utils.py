@@ -348,17 +348,20 @@ class ModuleUtilsMixin:
 
     def to(self, dtype: Optional[ms.Type] = None):
         for p in self.get_parameters():
-            p.set_dtype(dtype)
+            if p.dtype in [ms.float32, ms.bfloat16, ms.float16]:
+                p.set_dtype(dtype)
         return self
 
     def float(self):
         for p in self.get_parameters():
-            p.set_dtype(ms.float32)
+            if p.dtype in [ms.float32, ms.bfloat16, ms.float16]:
+                p.set_dtype(ms.float32)
         return self
 
     def half(self):
         for p in self.get_parameters():
-            p.set_dtype(ms.float16)
+            if p.dtype in [ms.float32, ms.bfloat16, ms.float16]:
+                p.set_dtype(ms.float16)
         return self
 
     @property
@@ -666,7 +669,7 @@ class MSPreTrainedModel(nn.Cell, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                     ' We recommend to just use `attn_implementation="flash_attention_2"` when loading the model.'
                 )
 
-            if config._attn_implementation not in ["eager", "sdpa", "flash_attention_2"]:
+            if config._attn_implementation not in ["eager", "sdpa", "flash_attention_2", "page_attention"]:
                 message = (
                     f'Specified `attn_implementation="{config._attn_implementation}"` is not supported. '
                     f'The only possible arguments are `attn_implementation="eager"`'
@@ -700,8 +703,6 @@ class MSPreTrainedModel(nn.Cell, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 config,
                 hard_check_only=False if requested_attn_implementation is None else True,
             )
-        else:
-            config._attn_implementation = "eager"
 
         return config
 
